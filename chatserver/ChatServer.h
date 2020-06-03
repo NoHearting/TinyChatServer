@@ -4,7 +4,7 @@
  * @Author: zsj
  * @Date: 2020-05-31 15:21:27
  * @LastEditors: zsj
- * @LastEditTime: 2020-05-31 21:02:10
+ * @LastEditTime: 2020-06-02 17:34:06
  */ 
 #ifndef CHATSERVER_H
 #define CHATSERVER_H
@@ -24,13 +24,18 @@
 #include <vector>
 #include <unordered_map>
 #include <string.h>
+#include <algorithm>
+#include <map>
+#include <exception>
 
 
 #include "../chat/ChatConnection.h"
 #include "../threadpool/threadpool.h"
-#include "../utils/utils.h"
+#include "../utils/libevent_utils.h"
 
 using namespace std;
+
+// class ChatConnection;
 
 class ChatServer
 {
@@ -63,35 +68,13 @@ public:
     void eventLoop();
 
 
-    /**
-     * @brief 创建一个定时事件处理器并且添加到注册事件队列
-     * @param cb 定时器回调函数
-     * @param timeout 定时器延迟事件
-     *
-     */ 
-    void addTimerEvent(event_callback_fn cb,const struct timeval *timeout);
-
-    /**
-     * @brief 创建一个信号事件处理器并添加到注册事件队列
-     * @param 信号值
-     * @param cb 回调函数
-     */ 
-    void addSignalEvent(evutil_socket_t fd, event_callback_fn cb);
-
-
-    /**
-     * @brief 创建一个I/O事件处理器并添加到注册事件队列
-     * @param 文件描述符值
-     * @param events 事件类型
-     * @param cb 回调函数
-     */ 
-    void addSocketEvent(evutil_socket_t fd, short events, event_callback_fn cb);
+    
 
     /**
      * @brief 添加新连接的用户
      */ 
     ChatConnection & addConnectionUser(int fd){
-        users_[fd] = ChatConnection(fd);
+        users_[fd] = ChatConnection(fd,libeventUtils_,&users_);
         return users_[fd];
     }
 
@@ -111,6 +94,36 @@ public:
     int getThreadNum(){return threadNum_;}
     void setThreadNum(int threadNum){threadNum_ = threadNum;}
 
+    unordered_map<int,ChatConnection>& getUsers(){return users_;}
+
+    LibeventUtils * getLibeventUtils(){return libeventUtils_;}
+
+    ChatConnection & getConnection(int fd){
+        if(users_.find(fd) != users_.end()){
+            return users_[fd];
+        }
+        else{
+            throw exception();
+        }
+    }
+
+    
+
+    /**
+     * @brief 关闭一个连接
+     */ 
+    void closeConnection(int fd){
+        if(users_.find(fd) != users_.end()){
+            event * ev = libeventUtils_->popEvent(fd);
+            event_del(ev);
+            event_free(ev);
+            users_.erase(users_.find(fd));
+            close(fd);
+        }
+        else{
+            throw exception();
+        }
+    }
 
 
 private:
@@ -126,22 +139,35 @@ private:
     int threadNum_;  //线程数量
 
     //libevent相关
-    struct event_base * base_;
-    vector<struct event *> events_;  //存放所有注册的事件处理器
+    LibeventUtils * libeventUtils_;
 
 
 
     ChatServer(int port = 9999,int threadNum = 8);
 
    
-    
-
-    
-
-
-    
-
 
 };
+
+/**
+ * @brief 信号处理器的回调函数
+ */ 
+void signalCallback(int fd,short event,void * arg);
+
+/**
+ * @brief 定时事件处理器的回调函数
+ */ 
+void timerCallback(int fd,short event,void * arg);
+
+/**
+ * @brief I/O事件处理器的回调函数,处理远程连接请求
+ */ 
+void socketLinkCallback(int fd,short event,void * arg);
+
+
+/**
+ * @brief I/O事件处理器的回调函数,处理数据传输
+ */ 
+void socketTransmitCallback(int fd,short event,void * arg);
 
 #endif

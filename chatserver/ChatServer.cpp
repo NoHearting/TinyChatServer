@@ -4,7 +4,7 @@
  * @Author: zsj
  * @Date: 2020-05-31 14:41:20
  * @LastEditors: zsj
- * @LastEditTime: 2020-05-31 21:59:22
+ * @LastEditTime: 2020-06-02 16:01:05
  */ 
 #include "ChatServer.h"
 
@@ -14,16 +14,12 @@ shared_ptr<ChatServer> ChatServer::chatServer_ = shared_ptr<ChatServer>(new Chat
 ChatServer::ChatServer(int port,int threadNum):port_(port),threadNum_(threadNum)
 {
     printf("init server.....\n");
-    base_ = event_init();
+    libeventUtils_ = new LibeventUtils();
 }
 
 ChatServer::~ChatServer()
 {
-    for(int i = 0;i<events_.size();i++)
-    {
-        event_free(events_[i]);
-    }
-    event_base_free(base_);
+    delete libeventUtils_;
 }
 
 
@@ -40,7 +36,7 @@ void ChatServer::initThreadPool()
 
 void ChatServer::eventLoop()
 {
-    event_base_dispatch(base_);
+    libeventUtils_->dispatch();
 }
 
 void ChatServer::eventListen()
@@ -76,42 +72,85 @@ void ChatServer::eventListen()
     }
 
     //将当前监听socket添加到事件队列中
-    addSocketEvent(listenfd,EV_READ|EV_PERSIST,socketLinkCallback);
+    libeventUtils_->addSocketEvent(listenfd,EV_READ|EV_PERSIST,socketLinkCallback);
 
-    addSignalEvent(SIGPIPE,NULL);
+    libeventUtils_->addSignalEvent(SIGPIPE,NULL);
 
     printf("add SIGALEM signal\n");
-    addSignalEvent(SIGALRM,signalCallback);
+    libeventUtils_->addSignalEvent(SIGALRM,signalCallback);
 
     printf("add SIGTERM signal\n");
-    addSignalEvent(SIGTERM,signalCallback);
+    libeventUtils_->addSignalEvent(SIGTERM,signalCallback);
 
     printf("add SIGINT signal\n");
-    addSignalEvent(SIGINT,signalCallback);
+    libeventUtils_->addSignalEvent(SIGINT,signalCallback);
 
 }
 
 
-void ChatServer::addSocketEvent(evutil_socket_t fd, short events, event_callback_fn cb)
+
+
+
+
+// Callback
+void signalCallback(int fd,short event,void * arg)
 {
-    event* socketEvent = event_new(base_,fd,events,cb,base_);
-    event_add(socketEvent,NULL);
-    events_.push_back(socketEvent);
+    printf("signal value is %d\n",fd);
+    switch(fd)
+    {
+        case SIGALRM:  //定时信号  14
+        {
+            printf("time tick!!!");
+            break;
+        }
+        case SIGTERM:  
+        {
+            break;
+        }
+        case SIGINT: //中断信号  2
+        {
+            struct event_base * base = static_cast<event_base *>(arg);
+            struct timeval delay = {2,0};
+            printf("Caught an interrupt signal;exiting cleanly in 2 seconds...\n");
+            event_base_loopexit(base,&delay);
+            break;
+        }
+    }
 }
 
-void ChatServer::addSignalEvent(evutil_socket_t fd, event_callback_fn cb)
+void timerCallback(int fd,short event,void * arg)
 {
-    event* signalEvent = evsignal_new(base_,fd,cb,base_);
-    event_add(signalEvent,NULL);
-    events_.push_back(signalEvent);
+
 }
 
-void ChatServer::addTimerEvent(event_callback_fn cb,const struct timeval *timeout)
+void socketLinkCallback(int fd,short event,void * arg)
 {
+    struct sockaddr_in clnt_addr;
+    socklen_t clnt_addr_sz = sizeof(clnt_addr);
+    int connfd = accept(fd,(sockaddr*)&clnt_addr,&clnt_addr_sz);
+    if(connfd < 0){
+        printf("Client line the server failed! errno is: %d\n",errno);
+        return;
+    }
+    printf("get a connection: %d\n",connfd);
 
+    setnonblocking(connfd);
+
+    ChatServer::getInstance()->getLibeventUtils()->addSocketEvent(connfd,EV_READ|EV_PERSIST,socketTransmitCallback);
+    ChatServer::getInstance()->addConnectionUser(connfd);
 }
 
-
-
+void socketTransmitCallback(int fd,short event,void * arg)
+{
+    auto & user = ChatServer::getInstance()->getConnection(fd);
+    if(user.read()){
+        cout<<"add a task to queue!"<<endl;
+        ChatServer::getInstance()->appendTask(user);
+    }
+    else{
+        cout<<"one client disconnecting..."<<endl;
+        ChatServer::getInstance()->closeConnection(fd);
+    }
+}
 
 

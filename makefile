@@ -9,7 +9,7 @@ else
 
 endif
 
-server: main.cpp ./utils/utils.* ./chat/ChatConnection.* ./chatserver/ChatServer.* ./lock/locker.h ./threadpool/threadpool.h
+server: main.cpp ./utils/utils.* ./chat/ChatConnection.* ./chatserver/ChatServer.* ./lock/locker.h ./threadpool/threadpool.h ./utils/libevent_utils.*
 	$(CXX) -o server $^ $(CXXFLAGS) -lpthread -levent
 
 clean:
